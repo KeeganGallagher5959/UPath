@@ -34,3 +34,28 @@ To stop the local Supabase services when finished, run:
 ```powershell
 npx supabase stop
 ```
+
+To add changes to the local db:
+
+```powershell
+npx supabase migration new add_desc_here
+```
+
+Then add changes only to new sql file.
+
+To alter tables in the local db:
+
+```powershell
+ALTER TABLE <table>
+ADD COLUMN <column name> <type>;
+
+ALTER TABLE <table>
+DROP COLUMN <column name>;
+```
+
+To alter specific column in the local db:
+
+```powershell
+ALTER TABLE <table>
+ALTER COLUMN <column name> <new type>;
+```

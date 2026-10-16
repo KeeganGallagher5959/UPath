@@ -1,6 +1,8 @@
 -- Initial Schema: Profiles, Locations, and Schedules
 
+-- --------------------------------------------------------------------------------
 -- Profiles:
+-- --------------------------------------------------------------------------------
 -- + UID: take value from Auth table.
 -- + Username: Should set automatically after sign up, unique.
 -- + Theme: Light or Dark
@@ -36,7 +38,9 @@ CREATE TRIGGER on_auth_user_created
 AFTER INSERT ON auth.users
 FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
+-- --------------------------------------------------------------------------------
 -- Location: Based on Coordinates
+-- --------------------------------------------------------------------------------
 -- + ID: PKey for each Loc
 -- + UID: Reference user who can edit it, also cascade delete
 -- + Name: Location Name
@@ -93,7 +97,9 @@ FOR EACH ROW
 WHEN (old.* IS DISTINCT FROM new.*)
 EXECUTE FUNCTION public.get_updated_at();
 
+-- --------------------------------------------------------------------------------
 -- Schedule Stops: The collection of locations in a schedule.
+-- --------------------------------------------------------------------------------
 -- The same locations can be repeated, like return to dorm.
 -- + ID: PKey for Stops
 -- + SID: Refers Schedule ID
@@ -121,7 +127,9 @@ CREATE TABLE public.schedule_stops (
 CREATE INDEX schedule_stops_time_id
 ON public.schedule_stops (schedule_id, start_time, end_time);
 
+-- --------------------------------------------------------------------------------
 -- Route Cache: Saved Open Route Service results between two stops.
+-- --------------------------------------------------------------------------------
 -- Store the time gap to check if it's enough for another stop.
 -- Can't be written by user.
 -- + ID: PKey
@@ -149,7 +157,10 @@ CREATE TABLE public.route_cache (
 
 CREATE INDEX route_cache_dest_id ON public.route_cache (dest_loc_id);
 
+-- --------------------------------------------------------------------------------
 -- Row Level Security
+-- --------------------------------------------------------------------------------
+
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.locations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.schedules ENABLE ROW LEVEL SECURITY;
