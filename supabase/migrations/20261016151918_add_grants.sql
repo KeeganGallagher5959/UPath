@@ -14,13 +14,13 @@ FROM anon, authenticated;
 GRANT SELECT ON public.profiles TO authenticated;
 GRANT UPDATE(theme, mode, access) on public.profiles TO authenticated;
 
--- Locations: User can any column.
+-- Locations: User can change any column.
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.locations TO authenticated;
 
--- Schedules: User can any column.
+-- Schedules: User can change any change column.
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.schedules TO authenticated;
 
--- Schedule Stops: User can any column.
+-- Schedule Stops: User can change any column.
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.schedule_stops TO authenticated;
 
 -- Route Cache: User can only read the columns.
