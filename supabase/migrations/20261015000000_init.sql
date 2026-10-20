@@ -60,7 +60,9 @@ CREATE TABLE public.locations (
 
 CREATE INDEX locations_uid ON public.locations (uid);
 
+-- --------------------------------------------------------------------------------
 -- Schedule: A plan for a day with collection of stops, a profile can have many schedule
+-- --------------------------------------------------------------------------------
 -- + ID: PKey for Schedule
 -- + UID: Reference user who can edit it, also cascade delete
 -- + Name: Schedule Name

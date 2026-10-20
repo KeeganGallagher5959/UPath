@@ -59,3 +59,17 @@ To alter specific column in the local db:
 ALTER TABLE <table>
 ALTER COLUMN <column name> <new type>;
 ```
+
+## Seed mock data for local only:
+
+Mock users, places, schedules, and such in `supabase/seeds/your_seed.sql`, register
+it in `config.toml` under `db.seed`. To load them, start supabase like above.
+
+```powershell
+npx supabase start
+npx supabase db reset
+```
+
+Login as user with `mock.alex@umass.edu`, `mock.sam@umass.edu`, `mock.jordan@umass.edu`
+Password: `password123`
+Never run seed against the remote project.
