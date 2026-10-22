@@ -1,15 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
-
-async function supabase() {
-  const cookieStore = await cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll() } }
-  );
-}
+import { createClient } from "@/lib/supabase/server";
 
 export async function PUT(
   request: Request,
@@ -17,7 +7,7 @@ export async function PUT(
 ) {
   const { eventId, scheduleId } = await params;
   const body = await request.json();
-  const { data, error } = await (await supabase())
+  const { data, error } = await (await createClient())
     .from('events')
     .update(body)
     .eq('id', eventId)
@@ -34,7 +24,7 @@ export async function DELETE(
   { params }: { params: Promise<{ scheduleId: string; eventId: string }> }
 ) {
   const { eventId, scheduleId } = await params;
-  const { error } = await (await supabase())
+  const { error } = await (await createClient())
     .from('events')
     .delete()
     .eq('id', eventId)

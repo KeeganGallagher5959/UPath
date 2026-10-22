@@ -1,22 +1,13 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
-
-async function supabase() {
-  const cookieStore = await cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll() } }
-  );
-}
+import { createClient } from "@/lib/supabase/server";
 
 export async function GET(
   _: Request,
   { params }: { params: Promise<{ scheduleId: string }> }
 ) {
   const { scheduleId } = await params;
-  const { data, error } = await (await supabase())
+  const { data, error } = await (await createClient())
     .from('events')
     .select('*')
     .eq('schedule_id', scheduleId);
@@ -31,7 +22,7 @@ export async function POST(
 ) {
   const { scheduleId } = await params;
   const body = await request.json();
-  const { data, error } = await (await supabase())
+  const { data, error } = await (await createClient())
     .from('events')
     .insert({ ...body, schedule_id: scheduleId })
     .select()

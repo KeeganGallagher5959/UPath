@@ -1,15 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
-
-async function supabase() {
-  const cookieStore = await cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll() } }
-  );
-}
+import { createClient } from "@/lib/supabase/server";
 
 export async function POST(request: Request) {
   const form = await request.formData();
@@ -17,7 +7,7 @@ export async function POST(request: Request) {
   if (!file) return NextResponse.json({ error: 'No file' }, { status: 400 });
 
   const text = await file.text();
-  const client = await supabase();
+  const client = await createClient());
 
   const { data: schedule, error: scheduleError } = await client
     .from('schedules')

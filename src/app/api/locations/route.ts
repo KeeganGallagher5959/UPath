@@ -1,18 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
-
-async function supabase() {
-  const cookieStore = await cookies();
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll() } }
-  );
-}
+import { createClient } from "@/lib/supabase/server";
 
 export async function GET() {
-  const { data, error } = await (await supabase())
+  const { data, error } = await (await createClient())
     .from('locations')
     .select('*');
 
@@ -22,7 +12,7 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   const updates = await request.json();
-  const { data, error } = await (await supabase())
+  const { data, error } = await (await createClient())
     .from('locations')
     .update(updates)
     .select()
