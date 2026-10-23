@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:profiles": "jest --runInBand tests/profiles.integration.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
@@ -32,7 +33,9 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.1",
     "supabase": "^2.121.0",
-    "typescript": "^5",
-    "vitest": "^2.1.9"
+    "@types/jest": "^30.0.0",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.5",
+    "typescript": "^5"
   }
 }
