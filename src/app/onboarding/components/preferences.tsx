@@ -1,13 +1,7 @@
 "use client"
 
 import * as React from "react"
-import {
-  Accessibility,
-  Bike,
-  Bus,
-  Car,
-  PersonStanding,
-} from "lucide-react"
+import { Accessibility, PersonStanding } from "lucide-react"
 import { cn } from "cn"
 
 import { BrandLockup } from "@/components/brand"
@@ -15,13 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
-
-const TRANSPORT = [
-  { value: "walk", label: "Walk", icon: PersonStanding },
-  { value: "bus", label: "PVTA Bus", icon: Bus },
-  { value: "bike", label: "Bike", icon: Bike },
-  { value: "car", label: "Car w/ parking permit", icon: Car },
-] as const
+import { TRANSPORT, type TransportMode } from "@/lib"
 
 const THEMES = [
   { value: "default", label: "Default", swatch: "#ffffff" },
@@ -44,7 +32,7 @@ const PREFERENCES: {
 
 /** Step 2 of onboarding — transport mode, theme, and accessibility prefs. */
 export function Preferences({ onContinue }: { onContinue: () => void }) {
-  const [transport, setTransport] = React.useState<(typeof TRANSPORT)[number]["value"]>("walk")
+  const [transport, setTransport] = React.useState<TransportMode>("foot")
   const [theme, setTheme] = React.useState<(typeof THEMES)[number]["value"]>("default")
   const [prefs, setPrefs] = React.useState<Record<PreferenceKey, boolean>>({
     wheelchair: true,

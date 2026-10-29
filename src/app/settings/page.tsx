@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
+import { TRANSPORT, type TransportMode } from "@/lib"
 
 const THEME_OPTIONS = [
     { value: "light", label: "Light", icon: Sun },
@@ -56,6 +57,7 @@ export default function Settings() {
     const { theme, setTheme } = useTheme();
     const [notifications, setNotifications] = React.useState(true);
     const [alerts, setAlerts] = React.useState(true);
+    const [transport, setTransport] = React.useState<TransportMode>("foot");
 
     return (
         <div className='mx-auto flex min-h-svh w-full max-w-2xl flex-col gap-6 bg-background px-5 py-6 sm:px-8'>
@@ -110,6 +112,35 @@ export default function Settings() {
                                     )}>
                                     <Icon className='size-5' />
                                     {label}
+                                </Button>
+                            );
+                        })}
+                    </div>
+                </Card>
+            </section>
+
+            {/* Transport */}
+            <section className='flex flex-col gap-2'>
+                <h2 className='px-1 text-sm font-semibold text-muted-foreground'>Transport</h2>
+                <Card className='p-4 sm:p-5'>
+                    <div className='grid grid-cols-2 gap-2'>
+                        {TRANSPORT.map(({ value, label, icon: Icon }) => {
+                            const selected = transport === value;
+                            return (
+                                <Button
+                                    key={value}
+                                    type='button'
+                                    variant='outline'
+                                    aria-pressed={selected}
+                                    onClick={() => setTransport(value)}
+                                    className={cn(
+                                        "h-auto min-h-14 justify-start gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold whitespace-normal",
+                                        selected
+                                            ? "border-primary text-primary ring-1 ring-primary hover:bg-primary/5 hover:text-primary"
+                                            : "text-muted-foreground"
+                                    )}>
+                                    <Icon className='size-5 shrink-0' />
+                                    <span className='text-pretty'>{label}</span>
                                 </Button>
                             );
                         })}
