@@ -1,119 +1,134 @@
+"use client"
+
+import { useEffect, useRef } from "react"
+import maplibregl from "maplibre-gl"
+import "maplibre-gl/dist/maplibre-gl.css"
 import { cn } from "cn"
 
 type Stop = {
   label: string
-  x: number
-  y: number
-  /** Anchor for the label, kept clear of the route line. */
-  tx: number
-  ty: number
-  anchor: "start" | "middle" | "end"
+  lng: number
+  lat: number
   start?: boolean
 }
 
+// UMass Amherst campus stops (ILC, Isenberg, Worcester, Morrill, LGRT).
+// Worcester coords are approximate; the rest come from OSM/Nominatim.
 const STOPS: Stop[] = [
-  { label: "ILC", x: 70, y: 80, tx: 84, ty: 76, anchor: "start", start: true },
-  { label: "Isenberg", x: 95, y: 250, tx: 109, ty: 246, anchor: "start" },
-  { label: "Worcester\nDining Commons", x: 250, y: 330, tx: 250, ty: 356, anchor: "middle" },
-  { label: "Morrill Science Center", x: 330, y: 190, tx: 318, ty: 186, anchor: "end" },
-  { label: "LGRT", x: 300, y: 60, tx: 288, ty: 56, anchor: "end" },
+  { label: "ILC", lng: -72.5259025, lat: 42.3910382, start: true },
+  { label: "Isenberg", lng: -72.5248569, lat: 42.3868154 },
+  { label: "Worcester\nDining Commons", lng: -72.52377, lat: 42.39266 },
+  { label: "Morrill Science Center", lng: -72.525248, lat: 42.391554 },
+  { label: "LGRT", lng: -72.5276631, lat: 42.3939219 },
 ]
 
-const ROUTE = STOPS.map((s) => `${s.x},${s.y}`).join(" ")
+const ROUTE: [number, number][] = STOPS.map((s) => [s.lng, s.lat])
+
+const STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 
 /**
- * Stylised campus map with the day's route traced between stops. Rendered as
- * SVG so it scales with its container and follows the theme tokens.
+ * Campus map with the day's route traced between stops. Uses MapLibre with
+ * OpenFreeMap tiles (no API key); the route is a straight-line placeholder
+ * until the routing API is wired up.
  */
 export function RouteMap({ className }: { className?: string }) {
+  const container = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const node = container.current
+    if (!node) return
+
+    let map: maplibregl.Map
+    try {
+      map = new maplibregl.Map({
+        container: node,
+        style: STYLE_URL,
+        center: [-72.5255, 42.3909],
+        zoom: 16,
+        cooperativeGestures: true,
+        attributionControl: { compact: true },
+      })
+    } catch {
+      // No WebGL (e.g. headless GPU-less browser) — keep the muted placeholder.
+      return
+    }
+
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right")
+
+    const resize = new ResizeObserver(() => map.resize())
+    resize.observe(node)
+
+    map.on("load", () => {
+      map.addSource("route", {
+        type: "geojson",
+        data: {
+          type: "Feature",
+          properties: {},
+          geometry: { type: "LineString", coordinates: ROUTE },
+        },
+      })
+
+      map.addLayer({
+        id: "route-casing",
+        type: "line",
+        source: "route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#ffffff", "line-width": 9, "line-opacity": 0.9 },
+      })
+
+      map.addLayer({
+        id: "route-line",
+        type: "line",
+        source: "route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#3b82f6", "line-width": 5 },
+      })
+
+      for (const stop of STOPS) {
+        // Keep the label inside the map: stops east of center label leftward.
+        const anchor = stop.lng > -72.5255 ? "right" : "left"
+
+        const el = document.createElement("div")
+        el.className = `flex items-center gap-1.5 ${anchor === "right" ? "flex-row-reverse" : ""}`
+
+        const dot = document.createElement("span")
+        dot.className = cn(
+          "block shrink-0 rounded-full border-2 bg-card shadow",
+          stop.start ? "size-4 border-primary" : "size-3 border-foreground/70"
+        )
+        el.appendChild(dot)
+
+        const text = document.createElement("span")
+        text.className =
+          "whitespace-nowrap rounded-md bg-card/90 px-1.5 py-0.5 text-xs font-semibold text-foreground shadow backdrop-blur"
+        text.textContent = stop.label.replace(/\n/g, " ")
+        el.appendChild(text)
+
+        new maplibregl.Marker({ element: el, anchor })
+          .setLngLat([stop.lng, stop.lat])
+          .addTo(map)
+      }
+
+      const bounds = new maplibregl.LngLatBounds()
+      for (const stop of STOPS) bounds.extend([stop.lng, stop.lat])
+      map.fitBounds(bounds, { padding: 64, duration: 0 })
+    })
+
+    return () => {
+      resize.disconnect()
+      map.remove()
+    }
+  }, [])
+
   return (
     <div
+      ref={container}
       className={cn(
-        "relative overflow-hidden rounded-2xl border border-border bg-muted",
+        "relative min-h-80 overflow-hidden rounded-2xl border border-border bg-muted",
         className
       )}
-    >
-      <svg
-        viewBox="0 0 400 400"
-        preserveAspectRatio="xMidYMid meet"
-        role="img"
-        aria-label="Campus map showing today's route between stops"
-        className="h-full w-full"
-      >
-        {/* Campus blocks */}
-        <g className="fill-card">
-          <rect x="-16" y="30" width="100" height="72" rx="8" />
-          <rect x="248" y="24" width="118" height="84" rx="8" />
-          <rect x="150" y="150" width="86" height="62" rx="8" />
-          <rect x="268" y="252" width="104" height="70" rx="8" />
-          <rect x="30" y="288" width="116" height="130" rx="8" />
-          <rect x="330" y="96" width="86" height="70" rx="8" />
-          <rect x="-20" y="150" width="86" height="62" rx="8" />
-        </g>
-
-        {/* Roads */}
-        <g className="stroke-border" strokeWidth="10" strokeLinecap="round">
-          <line x1="0" y1="200" x2="400" y2="200" />
-          <line x1="212" y1="0" x2="212" y2="400" />
-          <line x1="0" y1="110" x2="400" y2="110" />
-        </g>
-
-        {/* Route: casing + line */}
-        <polyline
-          points={ROUTE}
-          fill="none"
-          className="stroke-card"
-          strokeWidth="9"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <polyline
-          points={ROUTE}
-          fill="none"
-          className="stroke-blue-500 dark:stroke-blue-400"
-          strokeWidth="5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-
-        {/* Stops */}
-        <g>
-          {STOPS.map((stop) => (
-            <circle
-              key={stop.label}
-              cx={stop.x}
-              cy={stop.y}
-              r={stop.start ? 11 : 8}
-              strokeWidth="4"
-              className={cn(
-                "fill-card",
-                stop.start ? "stroke-primary" : "stroke-foreground/70"
-              )}
-            />
-          ))}
-        </g>
-
-        {/* Labels (haloed so the route never crosses the text) */}
-        <g
-          className="fill-foreground text-[13px] font-semibold"
-          stroke="var(--card)"
-          strokeWidth="3.5"
-          style={{ paintOrder: "stroke" }}
-        >
-          {STOPS.flatMap((stop) =>
-            stop.label.split("\n").map((line, i) => (
-              <text
-                key={`${stop.label}-${i}`}
-                x={stop.tx}
-                y={stop.ty + i * 15}
-                textAnchor={stop.anchor}
-              >
-                {line}
-              </text>
-            ))
-          )}
-        </g>
-      </svg>
-    </div>
+      role="img"
+      aria-label="Campus map showing today's route between stops"
+    />
   )
 }
