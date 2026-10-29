@@ -53,11 +53,57 @@ function SettingRow({
     )
 }
 
+function Skeleton({ className }: { className?: string }) {
+    return <div aria-hidden className={cn("animate-pulse rounded-xl bg-muted", className)} />
+}
+
 export default function Settings() {
     const { theme, setTheme } = useTheme();
     const [notifications, setNotifications] = React.useState(true);
     const [alerts, setAlerts] = React.useState(true);
     const [transport, setTransport] = React.useState<TransportMode>("foot");
+    const [accessibility, setAccessibility] = React.useState(false);
+    const [status, setStatus] = React.useState<"loading" | "idle" | "saving" | "saved" | "error">("loading");
+    const isLoading = status === "loading";
+
+    const hasLoaded = React.useRef(false);
+    React.useEffect(() => {
+        if (hasLoaded.current) return;
+        hasLoaded.current = true;
+
+        const loadSettings = async () => {
+            const response = await fetch('/api/profiles');
+            if (!response.ok) {
+                setStatus("error");
+                return;
+            }
+            const { profile } = await response.json();
+            setTheme(profile.theme);
+            setTransport(profile.mode);
+            setAccessibility(profile.access);
+            setStatus("idle");
+        };
+        
+        loadSettings();
+    }, [setTheme]);
+
+    const onSettingsChange = async () => {
+        setStatus("saving");
+        const data = {
+            theme: theme ?? "system",
+            mode: transport,
+            access: accessibility
+        };
+
+        const response = await fetch('/api/profiles', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+        setStatus(response.ok ? "saved" : "error");
+    }
 
     return (
         <div className='mx-auto flex min-h-svh w-full max-w-2xl flex-col gap-6 bg-background px-5 py-6 sm:px-8'>
@@ -94,8 +140,11 @@ export default function Settings() {
             <section className='flex flex-col gap-2'>
                 <h2 className='px-1 text-sm font-semibold text-muted-foreground'>Appearance</h2>
                 <Card className='p-4 sm:p-5'>
-                    <div className='grid grid-cols-3 gap-2'>
-                        {THEME_OPTIONS.map(({ value, label, icon: Icon }) => {
+                    <div className='grid grid-cols-3 gap-2' aria-busy={isLoading}>
+                        {isLoading && THEME_OPTIONS.map(({ value }) => (
+                            <Skeleton key={value} className='h-16' />
+                        ))}
+                        {!isLoading && THEME_OPTIONS.map(({ value, label, icon: Icon }) => {
                             const selected = theme === value;
                             return (
                                 <Button
@@ -123,8 +172,11 @@ export default function Settings() {
             <section className='flex flex-col gap-2'>
                 <h2 className='px-1 text-sm font-semibold text-muted-foreground'>Transport</h2>
                 <Card className='p-4 sm:p-5'>
-                    <div className='grid grid-cols-2 gap-2'>
-                        {TRANSPORT.map(({ value, label, icon: Icon }) => {
+                    <div className='grid grid-cols-2 gap-2' aria-busy={isLoading}>
+                        {isLoading && TRANSPORT.map(({ value }) => (
+                            <Skeleton key={value} className='h-14' />
+                        ))}
+                        {!isLoading && TRANSPORT.map(({ value, label, icon: Icon }) => {
                             const selected = transport === value;
                             return (
                                 <Button
@@ -181,14 +233,33 @@ export default function Settings() {
                         title='Wheelchair-accessible routes'
                         description='Only suggest step-free options.'
                         control={
-                            <Switch
-                                aria-label='Wheelchair-accessible routes'
-                                defaultChecked
-                            />
+                            isLoading ? (
+                                <Skeleton className='h-[18.4px] w-[32px] rounded-full' />
+                            ) : (
+                                <Switch
+                                    aria-label='Wheelchair-accessible routes'
+                                    checked={accessibility}
+                                    onCheckedChange={setAccessibility}
+                                />
+                            )
                         }
                     />
                 </Card>
             </section>
+
+            <div className='flex flex-col gap-2'>
+                <Button
+                    type='button'
+                    onClick={onSettingsChange}
+                    disabled={status === "loading" || status === "saving"}
+                    className='h-12 w-full rounded-xl bg-primary text-lg font-semibold text-primary-foreground hover:bg-primary/90'>
+                    {status === "saving" ? "Saving..." : "Save"}
+                </Button>
+                <p role='status' className='text-center text-sm text-muted-foreground'>
+                    {status === "saved" && "Settings saved."}
+                    {status === "error" && "Something went wrong. Please try again."}
+                </p>
+            </div>
 
             {/* Calendars */}
             <section className='flex flex-col gap-2'>

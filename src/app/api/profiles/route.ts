@@ -13,9 +13,15 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   const { theme, mode, access } = await request.json();
-  const { data, error } = await (await createClient())
+  const supabase = await createClient();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Not logged in' }, { status: 401 });
+
+  const { data, error } = await supabase
     .from('profiles')
     .update({ theme, mode, access })
+    .eq('id', user.id)
     .select('id, username, theme, mode, access')
     .single();
 
