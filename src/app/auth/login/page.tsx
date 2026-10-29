@@ -40,13 +40,27 @@ export default function Login() {
 
         setIsLoading(true);
 
-        await new Promise((resolve) => { setTimeout(resolve, 1000) });
+        try {
+            const res = await fetch("/api/auth/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json"},
+                body: JSON.stringify({ email, password }),
+                signal: controller.signal
+            });
 
-        if (controller.signal.aborted) {
-            return;
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({}));
+                setError(data.error ?? "Something went wrong. Please try again.");
+                setIsLoading(false);
+                return;
+            }
+            router.push('/home');
+            router.refresh();
+        } catch (err){
+            if (err instanceof DOMException && err.name === "AbortError") return;
+            setError("Network Error. Please try again.")
+            setIsLoading(false);
         }
-
-        router.push('/home');
     }
 
     return (
