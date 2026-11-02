@@ -1,6 +1,7 @@
 "use client"
 import * as React from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import {
     Accessibility,
@@ -18,6 +19,14 @@ import { cn } from "cn"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { TRANSPORT, type TransportMode } from "@/lib"
@@ -58,7 +67,12 @@ function Skeleton({ className }: { className?: string }) {
 }
 
 export default function Settings() {
+    const router = useRouter();
     const { theme, setTheme } = useTheme();
+    const [username, setUsername] = React.useState("");
+    const [email, setEmail] = React.useState("");
+    const [accountStatus, setAccountStatus] = React.useState<"idle" | "signingOut" | "deleting" | "error">("idle");
+    const [deleteOpen, setDeleteOpen] = React.useState(false);
     const [notifications, setNotifications] = React.useState(true);
     const [alerts, setAlerts] = React.useState(true);
     const [transport, setTransport] = React.useState<TransportMode>("foot");
@@ -73,26 +87,36 @@ export default function Settings() {
 
         const loadSettings = async () => {
             const response = await fetch('/api/profiles');
+            if (response.status === 401) {
+                router.replace('/auth/login');
+                return;
+            }
             if (!response.ok) {
                 setStatus("error");
                 return;
             }
             const { profile } = await response.json();
+            setUsername(profile.username);
+            setEmail(profile.email ?? "");
             setTheme(profile.theme);
             setTransport(profile.mode);
             setAccessibility(profile.access);
+            setNotifications(profile.push_notifications);
+            setAlerts(profile.class_alerts);
             setStatus("idle");
         };
-        
+
         loadSettings();
-    }, [setTheme]);
+    }, [setTheme, router]);
 
     const onSettingsChange = async () => {
         setStatus("saving");
         const data = {
             theme: theme ?? "system",
             mode: transport,
-            access: accessibility
+            access: accessibility,
+            push_notifications: notifications,
+            class_alerts: alerts,
         };
 
         const response = await fetch('/api/profiles', {
@@ -104,6 +128,32 @@ export default function Settings() {
         });
         setStatus(response.ok ? "saved" : "error");
     }
+
+    const onSignOut = async () => {
+        setAccountStatus("signingOut");
+        const response = await fetch('/api/auth/logout', { method: 'POST' });
+        if (!response.ok) {
+            setAccountStatus("error");
+            return;
+        }
+        router.replace('/auth/login');
+        router.refresh();
+    }
+
+    const onDeleteAccount = async () => {
+        setAccountStatus("deleting");
+        const response = await fetch('/api/auth/account', { method: 'DELETE' });
+        if (!response.ok) {
+            setAccountStatus("error");
+            setDeleteOpen(false);
+            return;
+        }
+        router.replace('/auth/signup');
+        router.refresh();
+    }
+
+    const initials = username.slice(0, 2).toUpperCase() || "UM";
+    const accountBusy = accountStatus === "signingOut" || accountStatus === "deleting";
 
     return (
         <div className='mx-auto flex min-h-svh w-full max-w-2xl flex-col gap-6 bg-background px-5 py-6 sm:px-8'>
@@ -125,12 +175,21 @@ export default function Settings() {
                 <div className='flex items-center gap-4 px-4 py-5 sm:px-5'>
                     <Avatar className='size-14'>
                         <AvatarFallback className='bg-primary text-lg font-semibold text-primary-foreground'>
-                            UM
+                            {initials}
                         </AvatarFallback>
                     </Avatar>
                     <div className='min-w-0 flex-1'>
-                        <p className='truncate text-base font-semibold'>Student Name</p>
-                        <p className='truncate text-sm text-muted-foreground'>student@umass.edu</p>
+                        {isLoading ? (
+                            <div className='flex flex-col gap-1.5'>
+                                <Skeleton className='h-5 w-32 rounded-md' />
+                                <Skeleton className='h-4 w-44 rounded-md' />
+                            </div>
+                        ) : (
+                            <>
+                                <p className='truncate text-base font-semibold'>{username}</p>
+                                <p className='truncate text-sm text-muted-foreground'>{email}</p>
+                            </>
+                        )}
                     </div>
                     <Button variant='outline' className='shrink-0 rounded-xl'>Edit</Button>
                 </div>
@@ -209,11 +268,15 @@ export default function Settings() {
                         title='Push notifications'
                         description='Service changes and route disruptions.'
                         control={
-                            <Switch
-                                aria-label='Push notifications'
-                                checked={notifications}
-                                onCheckedChange={setNotifications}
-                            />
+                            isLoading ? (
+                                <Skeleton className='h-[18.4px] w-[32px] rounded-full' />
+                            ) : (
+                                <Switch
+                                    aria-label='Push notifications'
+                                    checked={notifications}
+                                    onCheckedChange={setNotifications}
+                                />
+                            )
                         }
                     />
                     <SettingRow
@@ -221,11 +284,15 @@ export default function Settings() {
                         title='Leave-for-class alerts'
                         description='Remind me when it is time to leave.'
                         control={
-                            <Switch
-                                aria-label='Leave-for-class alerts'
-                                checked={alerts}
-                                onCheckedChange={setAlerts}
-                            />
+                            isLoading ? (
+                                <Skeleton className='h-[18.4px] w-[32px] rounded-full' />
+                            ) : (
+                                <Switch
+                                    aria-label='Leave-for-class alerts'
+                                    checked={alerts}
+                                    onCheckedChange={setAlerts}
+                                />
+                            )
                         }
                     />
                     <SettingRow
@@ -298,10 +365,10 @@ export default function Settings() {
                         control={
                             <Button
                                 variant='outline'
-                                nativeButton={false}
                                 className='rounded-xl'
-                                render={<Link href='/auth/login' />}>
-                                Sign out
+                                onClick={onSignOut}
+                                disabled={accountBusy}>
+                                {accountStatus === "signingOut" ? "Signing out..." : "Sign out"}
                             </Button>
                         }
                     />
@@ -310,10 +377,39 @@ export default function Settings() {
                         title='Delete account'
                         description='This action cannot be undone.'
                         control={
-                            <Button variant='destructive' className='rounded-xl'>Delete</Button>
+                            <Button
+                                variant='destructive'
+                                className='rounded-xl'
+                                onClick={() => setDeleteOpen(true)}
+                                disabled={accountBusy}>
+                                Delete
+                            </Button>
                         }
                     />
                 </Card>
+                {accountStatus === "error" && (
+                    <p role='status' className='px-1 text-sm text-destructive'>
+                        Something went wrong. Please try again.
+                    </p>
+                )}
+                <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+                    <DialogContent>
+                        <DialogHeader>
+                            <DialogTitle>Delete your account?</DialogTitle>
+                            <DialogDescription>
+                                This removes your profile, saved locations, and schedules. It cannot be undone.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <DialogFooter>
+                            <Button variant='outline' className='rounded-xl' onClick={() => setDeleteOpen(false)} disabled={accountBusy}>
+                                Cancel
+                            </Button>
+                            <Button variant='destructive' className='rounded-xl' onClick={onDeleteAccount} disabled={accountBusy}>
+                                {accountStatus === "deleting" ? "Deleting..." : "Delete account"}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </section>
         </div>
     );
