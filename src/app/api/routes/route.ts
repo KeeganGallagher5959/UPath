@@ -11,7 +11,7 @@ export async function GET(request: Request) {
     .select('*')
     .eq('from', from)
     .eq('to', to)
-    .single();
+    .single());
 
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ route: data });
