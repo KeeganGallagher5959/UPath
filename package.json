@@ -20,6 +20,7 @@
     "maplibre-gl": "^5.24.0",
     "next": "16.4.1",
     "next-themes": "^0.4.6",
+    "node-ical": "^0.27.4",
     "postcss": "^8.5.30",
     "react": "19.3.0",
     "react-dom": "19.3.0",
