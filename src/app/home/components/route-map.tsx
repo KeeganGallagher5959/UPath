@@ -22,14 +22,42 @@ const STOPS: Stop[] = [
   { label: "LGRT", lng: -72.5276631, lat: 42.3939219 },
 ]
 
-const ROUTE: [number, number][] = STOPS.map((s) => [s.lng, s.lat])
-
 const STYLE_URL = "https://tiles.openfreemap.org/styles/liberty"
 
+// Keyless OSRM instance (OpenStreetMap Germany). The path still says
+// "driving" for every profile; routed-foot selects the pedestrian graph.
+const ROUTING_BASE =
+  "https://routing.openstreetmap.de/routed-foot/route/v1/driving"
+
 /**
- * Campus map with the day's route traced between stops. Uses MapLibre with
- * OpenFreeMap tiles (no API key); the route is a straight-line placeholder
- * until the routing API is wired up.
+ * Road-following walking route through the stops, in order. OSRM returns the
+ * full geometry per leg; legs share endpoints, so drop each joint duplicate.
+ */
+async function fetchWalkingRoute(stops: Stop[]): Promise<[number, number][]> {
+  const legs = await Promise.all(
+    stops.slice(1).map(async (_, i) => {
+      const a = stops[i]
+      const b = stops[i + 1]
+      const url = `${ROUTING_BASE}/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`Routing failed: ${res.status}`)
+      const data = await res.json()
+      const line = data?.routes?.[0]?.geometry?.coordinates
+      if (!Array.isArray(line) || line.length < 2) throw new Error("No route returned")
+      return line as [number, number][]
+    })
+  )
+
+  return legs.reduce<[number, number][]>(
+    (acc, leg) => acc.concat(acc.length ? leg.slice(1) : leg),
+    []
+  )
+}
+
+/**
+ * Campus map with the day's route traced along actual roads/paths between
+ * stops. Uses MapLibre + OpenFreeMap tiles for the basemap and keyless OSRM
+ * for the walking directions.
  */
 export function RouteMap({ className }: { className?: string }) {
   const container = useRef<HTMLDivElement>(null)
@@ -38,6 +66,7 @@ export function RouteMap({ className }: { className?: string }) {
     const node = container.current
     if (!node) return
 
+    let cancelled = false
     let map: maplibregl.Map
     try {
       map = new maplibregl.Map({
@@ -64,7 +93,7 @@ export function RouteMap({ className }: { className?: string }) {
         data: {
           type: "Feature",
           properties: {},
-          geometry: { type: "LineString", coordinates: ROUTE },
+          geometry: { type: "LineString", coordinates: [] },
         },
       })
 
@@ -112,9 +141,26 @@ export function RouteMap({ className }: { className?: string }) {
       const bounds = new maplibregl.LngLatBounds()
       for (const stop of STOPS) bounds.extend([stop.lng, stop.lat])
       map.fitBounds(bounds, { padding: 64, duration: 0 })
+
+      // Draw nothing until the real walking route arrives — the source stays
+      // empty on failure instead of falling back to straight lines.
+      fetchWalkingRoute(STOPS)
+        .then((coordinates) => {
+          if (cancelled) return
+          const source = map.getSource("route") as maplibregl.GeoJSONSource | undefined
+          source?.setData({
+            type: "Feature",
+            properties: {},
+            geometry: { type: "LineString", coordinates },
+          })
+        })
+        .catch(() => {
+          // Keep the map readable; the route line simply stays hidden.
+        })
     })
 
     return () => {
+      cancelled = true
       resize.disconnect()
       map.remove()
     }
