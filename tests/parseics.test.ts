@@ -126,6 +126,36 @@ END:VCALENDAR`);
       { startDate: "2026-07-15", startTime: "14:00", endTime: "15:00", timezone: "America/New_York" },
     ]);
   });
+
+  it("uses an event TZID before the calendar timezone", () => {
+    const calendar = parseIcs(`BEGIN:VCALENDAR
+X-WR-TIMEZONE:America/New_York
+BEGIN:VEVENT
+DTSTART;TZID=America/Los_Angeles:20260715T090000
+DURATION:PT1H
+SUMMARY:TZID event
+END:VEVENT
+END:VCALENDAR`);
+
+    expect(calendar.events[0].timezone).toBe("America/Los_Angeles");
+  });
+
+  it("shifts UTC recurrence weekdays and converts UTC UNTIL to New York date", () => {
+    const calendar = parseIcs(`BEGIN:VCALENDAR
+BEGIN:VEVENT
+DTSTART:20260908T010000Z
+DURATION:PT1H
+RRULE:FREQ=WEEKLY;BYDAY=TU;UNTIL=20260908T010000Z
+SUMMARY:UTC recurring event
+END:VEVENT
+END:VCALENDAR`);
+    const event = calendar.events[0];
+
+    expect(event.startDate).toBe("2026-09-07");
+    expect(event.days).toEqual(["Monday"]);
+    expect(event.recurrence?.until).toBe("2026-09-07");
+    expect(getOccurrences(event, "2026-09-01", "2026-09-20")).toEqual(["2026-09-07"]);
+  });
 });
  
 describe("occurrences", () => {

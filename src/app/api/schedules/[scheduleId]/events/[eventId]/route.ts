@@ -1,9 +1,9 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { loadCalendar } from '@/lib/schedules/loadCalendar';
-import { applyEdit } from '@/lib/schedules/applyEdit';
-import { parseIcs } from '@/lib/ics/parseIcs';
-import { updateEvent, deleteEvent } from '@/lib/ics/editics';
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { loadCalendar } from "@/lib/schedules/loadCalendar";
+import { applyEdit } from "@/lib/schedules/applyEdit";
+import { parseIcs } from "@/lib/ics/parseIcs";
+import { updateEvent, deleteEvent } from "@/lib/ics/editics";
  
 type Ctx = { params: Promise<{ scheduleId: string; eventId: string }> };
  

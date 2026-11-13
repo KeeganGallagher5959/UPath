@@ -201,6 +201,11 @@ function isoNumber(date: string): number {
 export function weekdayName(date: string): Weekday {
   return WEEKDAYS[isoNumber(date) - 1];
 }
+
+function shiftWeekday(day: Weekday, offset: number): Weekday {
+  const index = WEEKDAYS.indexOf(day);
+  return WEEKDAYS[((index + offset) % WEEKDAYS.length + WEEKDAYS.length) % WEEKDAYS.length];
+}
  
 function addDays(date: string, n: number): string {
   const d = dateToUtc(date);
@@ -232,7 +237,11 @@ export function parseRrule(raw: string) {
     .map((d) => BYDAY_MAP[d.trim().toUpperCase().slice(-2)]) // drop number prefix if exist 1MO to MO
     .filter((d): d is Weekday => d !== undefined);
     
-  const until = parts.UNTIL ? parseDateTime(parts.UNTIL)?.date ?? null : null;
+  const parsedUntil = parts.UNTIL ? parseDateTime(parts.UNTIL) : null;
+  const until =
+    parsedUntil?.isUtc && parsedUntil.time
+      ? convertUtcToNewYork(parsedUntil.date, parsedUntil.time).date
+      : parsedUntil?.date ?? null;
 
   return {
     freq: (parts.FREQ ?? "").toUpperCase(),
@@ -289,7 +298,7 @@ export function parseIcs(text: string): ParsedCalendar {
       ? { ...parsedStart, ...convertUtcToNewYork(parsedStart.date, parsedStart.time ?? "00:00") }
       : parsedStart;
     const startTime = start.time ?? "00:00";
-    const timezone = parsedStart.isUtc ? "America/New_York" : dtstart?.params.TZTID ?? calTimezone;
+    const timezone = parsedStart.isUtc ? "America/New_York" : dtstart?.params.TZID ?? calTimezone;
 
     /** Duration: Get from DURATION, or dtstart - dtend. (our school ics use duration, but dtend here if they import from ggl calendar)*/
     let durationMinutes = 0;
@@ -331,9 +340,12 @@ export function parseIcs(text: string): ParsedCalendar {
     const supportedRecurrence = !recurrence || recurrence.freq === "WEEKLY";
 
     /** Day of the week: If exists in RRULE, sort by weekday, else convert date to weekday and save it.*/
+    const dayShift = parsedStart.isUtc ? daysBetween(parsedStart.date, start.date) : 0;
     const days : Weekday[] =
       recurrence && recurrence.byDay.length > 0
-        ? [...recurrence.byDay].sort((a,b) => WEEKDAYS.indexOf(a) - WEEKDAYS.indexOf(b))
+        ? recurrence.byDay
+            .map((day) => shiftWeekday(day, dayShift))
+            .sort((a,b) => WEEKDAYS.indexOf(a) - WEEKDAYS.indexOf(b))
         : [weekdayName(start.date)];
     
     /** Event name: given by summary.*/
@@ -341,7 +353,7 @@ export function parseIcs(text: string): ParsedCalendar {
 
     /** Push all event attributes to the list.*/
     events.push({
-      id: get("UID")?.value.trim() || "${name}|${start.date}T${startTime}",
+      id: get("UID")?.value.trim() || `${name}|${start.date}T${startTime}`,
       name,
       location: cleanText(get("LOCATION")?.value ?? ""),
       startDate: start.date,
