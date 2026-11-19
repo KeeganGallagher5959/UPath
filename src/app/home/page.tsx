@@ -5,7 +5,7 @@ import { CloudUpload, LogOut, Settings } from "lucide-react"
 
 import { BrandLockup } from "@/components/brand"
 import { Button } from "@/components/ui/button"
-import { CalendarTabs, RouteMap, ScheduleList } from "./components"
+import { CalendarTabs, DayCalendar, RouteMap } from "./components"
 
 export default function Home() {
     const [calendars, setCalendars] = useState(["Fall 2026", "Calendar 2"]);
@@ -48,7 +48,7 @@ export default function Home() {
 
                 <div className='grid flex-1 gap-4 lg:grid-cols-2'>
                     <RouteMap className='aspect-[4/3] w-full lg:aspect-auto lg:h-full lg:min-h-[32rem]' />
-                    <ScheduleList calendarName={calendars[active]} className='lg:self-start' />
+                    <DayCalendar calendarName={calendars[active]} className="lg:self-start" />
                 </div>
             </main>
 
