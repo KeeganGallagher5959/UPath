@@ -576,3 +576,51 @@ export function searchEvents(events: IcsEvent[], opts: SearchOptions = {}): IcsE
 export function eventsOnDate(events: IcsEvent[], date: string): IcsEvent[] {
   return events.filter((e) => occursOn(e, date)).sort((a, b) => a.startTime.localeCompare(b.startTime));
 }
+
+/** Remove repeated VEVENT records that represent the same scheduled class. */
+export function deduplicateEvents(events: IcsEvent[]): IcsEvent[] {
+  const seen = new Map<string, number>();
+  const output: IcsEvent[] = [];
+  const locationCounts = new Map<string, Map<string, number>>();
+
+  for (const event of events) {
+    if (event.status?.toUpperCase() === "CANCELLED") continue;
+    const name = event.name.toLowerCase().replace(/\s+/g, " ").trim();
+    const occurrence =
+      event.recurrence && event.days.length > 0
+        ? [...event.days].sort((a, b) => WEEKDAYS.indexOf(a) - WEEKDAYS.indexOf(b)).join(",")
+        : `date:${event.startDate}`;
+    const key = [name, event.startTime, occurrence].join("|");
+    const existingIndex = seen.get(key);
+
+    if (existingIndex === undefined) {
+      seen.set(key, output.length);
+      output.push(event);
+      const counts = new Map<string, number>();
+      if (event.location.trim()) counts.set(event.location.trim().toLowerCase(), 1);
+      locationCounts.set(key, counts);
+      continue;
+    }
+
+    if (event.location.trim()) {
+      const counts = locationCounts.get(key) ?? new Map<string, number>();
+      const normalized = event.location.trim().toLowerCase();
+      counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+      locationCounts.set(key, counts);
+
+      const existing = output[existingIndex];
+      const existingLocationCount = existing.location
+        ? counts.get(existing.location.trim().toLowerCase()) ?? 0
+        : 0;
+      const nextLocationCount = counts.get(normalized) ?? 0;
+      if (!existing.location || nextLocationCount > existingLocationCount) {
+        output[existingIndex] = {
+          ...existing,
+          location: event.location.trim(),
+        };
+      }
+    }
+  }
+
+  return output;
+}

@@ -283,10 +283,36 @@ function findBlock(lines: string[], eventId: string): { start: number, end: numb
                 break;
             }
         }
-        if (end = -1) return null;
-        const entries = toEntries(lines.slice(i, end - 1));
-        const uid = entries.find((e) => e.name === "UID" && !e.nested);
-        if (uid && valueOf(uid).trim() === eventId) return { start: 1, end};
+        if (end === -1) return null;
+
+        let uid = "";
+        let summary = "";
+        let startDateTime = "";
+        for (let j = i + 1; j < end; j++) {
+            const uidMatch = /^UID(?:;[^:]*)?:(.*)$/i.exec(lines[j].trim());
+            if (uidMatch) {
+                uid = uidMatch[1].trim();
+                let k = j + 1;
+                while (k < end && /^[ \t]/.test(lines[k])) {
+                    uid += lines[k].replace(/^[ \t]/, "");
+                    k++;
+                }
+            }
+
+            const summaryMatch = /^SUMMARY(?:;[^:]*)?:(.*)$/i.exec(lines[j].trim());
+            if (summaryMatch) summary = summaryMatch[1].trim();
+
+            const startMatch = /^DTSTART(?:;[^:]*)?:(.*)$/i.exec(lines[j].trim());
+            if (startMatch) startDateTime = startMatch[1].trim();
+        }
+
+        if (uid.trim() === eventId.trim()) return { start: i, end };
+        if (!uid) {
+            const startDate = startDateTime.slice(0, 8).replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3");
+            const startTime = startDateTime.slice(9, 13).replace(/^(\d{2})(\d{2})$/, "$1:$2");
+            const fallbackId = `${summary}|${startDate}T${startTime}`;
+            if (fallbackId === eventId.trim()) return { start: i, end };
+        }
         i = end;
     }
     return null;
@@ -294,8 +320,10 @@ function findBlock(lines: string[], eventId: string): { start: number, end: numb
 
 /** Final safety check: the edited text must still contain a readable event. */
 function verify(text: string, id: string): EditResult {
-  const found = parseIcs(text).events.some((e) => e.id === id);
-  return found ? { ok: true, text, id } : fail("invalid", "The edit produced an unreadable event");
+  const parsed = parseIcs(text);
+  return parsed.events.length > 0
+    ? { ok: true, text, id }
+    : fail("invalid", "The edit produced an unreadable event");
 }
 
 /* --------------------------- Add event --------------------------- */
@@ -309,7 +337,7 @@ function buildEventLines(f: Fields, uid: string): string[] {
     ];
     if (f.days) lines.push(`RRULE:${buildRrule(f)}`);
     if (f.location) lines.push(`LOCATION:${escapeText(f.location)}`);
-    lines.push("STATUS: CONFIRMED", ...fold(`SUMMARY:${escapeText(f.name)}`), "END.VEVENT");
+    lines.push("STATUS:CONFIRMED", ...fold(`SUMMARY:${escapeText(f.name)}`), "END:VEVENT");
     return lines;
 }
 

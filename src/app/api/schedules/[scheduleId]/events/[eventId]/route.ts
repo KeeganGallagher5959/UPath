@@ -8,11 +8,7 @@ import { updateEvent, deleteEvent } from "@/lib/ics/editics";
 type Ctx = { params: Promise<{ scheduleId: string; eventId: string }> };
  
 function decode(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
+  return value;
 }
  
 // GET /api/schedules/:scheduleId/events/:eventId -> one event, found by its UID

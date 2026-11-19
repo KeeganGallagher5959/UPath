@@ -6,8 +6,10 @@ import {
   searchEvents,
   getOccurrences,
   eventsOnDate,
+  deduplicateEvents,
   setCalendarName,
 } from "../src/lib/ics/parseIcs";
+import { updateEvent, deleteEvent } from "../src/lib/ics/editics";
  
 const SAMPLE = `BEGIN:VCALENDAR
 CALSCALE:GREGORIAN
@@ -277,5 +279,89 @@ describe("setCalendarName", () => {
   it("only touches the calendar name, not event lines", () => {
     const out = setCalendarName(SAMPLE, "Z");
     expect(out.replace(/X-WR-CALNAME:.*\n/, "")).toBe(SAMPLE.replace(/X-WR-CALNAME:.*\n/, ""));
+  });
+});
+
+describe("deduplicateEvents", () => {
+  it("merges duplicate recurring records and keeps the most common location", () => {
+    const events = parseIcs(SAMPLE).events;
+    if (events.length === 0) throw new Error("sample has no events");
+
+    const base = events[0];
+    const duplicate = {
+      ...base,
+      id: "same-class-different-record",
+      location: "Computer Science Bldg rm W150",
+    };
+    const otherDuplicate = {
+      ...base,
+      id: "third-record",
+      location: "Computer Science Labs E110",
+    };
+
+    const result = deduplicateEvents([
+      { ...base, location: "" },
+      duplicate,
+      duplicate,
+      otherDuplicate,
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].location).toBe("Computer Science Bldg rm W150");
+  });
+});
+
+describe("editing events", () => {
+  it("finds and updates an event by UID", () => {
+    const text = `BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:test-event-1
+DTSTART:20260908T100000
+DURATION:PT50M
+LOCATION:Computer Science Bldg rm W150
+SUMMARY:COMPSCI 320-01 LEC(12056)
+END:VEVENT
+END:VCALENDAR`;
+
+    const updated = updateEvent(text, "test-event-1", { name: "Test Class" });
+    expect(updated.ok).toBe(true);
+    if (!updated.ok) return;
+    expect(parseIcs(updated.text).events[0].name).toBe("Test Class");
+
+    const deleted = deleteEvent(updated.text, "test-event-1");
+    expect(deleted.ok).toBe(true);
+  });
+
+  it("finds a UID with folded continuation lines", () => {
+    const text = `BEGIN:VCALENDAR
+BEGIN:VEVENT
+UID:folded-
+ uid-value
+DTSTART:20260908T100000
+DURATION:PT50M
+SUMMARY:Folded UID
+END:VEVENT
+END:VCALENDAR`;
+
+    const updated = updateEvent(text, "folded-uid-value", { name: "Renamed" });
+    expect(updated.ok).toBe(true);
+  });
+
+  it("finds an event by the parser fallback ID", () => {
+    const text = `BEGIN:VCALENDAR
+BEGIN:VEVENT
+DTSTART:20260909T090500
+DURATION:PT50M
+SUMMARY:HISTORY 110-01 LEC(14020)
+END:VEVENT
+END:VCALENDAR`;
+
+    const updated = updateEvent(
+      text,
+      "HISTORY 110-01 LEC(14020)|2026-09-09T09:05",
+      { name: "HIST 110" },
+    );
+    expect(updated.ok).toBe(true);
   });
 });

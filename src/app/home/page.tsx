@@ -1,13 +1,19 @@
 "use client"
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
+import dynamic from "next/dynamic"
 import { CloudUpload, LogOut, Settings } from "lucide-react"
 
 import { BrandLockup } from "@/components/brand"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { CalendarTabs, DayCalendar, RouteMap } from "./components"
+import { CalendarTabs, RouteMap } from "./components"
+
+const DayCalendar = dynamic(
+    () => import("./components/day-calendar").then((module) => module.DayCalendar),
+    { ssr: false },
+)
 
 type Schedule = { id: string; name: string }
 
@@ -128,7 +134,11 @@ export default function Home() {
 
                 <div className='grid flex-1 gap-4 lg:grid-cols-2'>
                     <RouteMap className='aspect-[4/3] w-full lg:aspect-auto lg:h-full lg:min-h-[32rem]' />
-                    <DayCalendar calendarName={activeName} className="lg:self-start" />
+                    <DayCalendar
+                        scheduleId={calendars[active]?.id}
+                        calendarName={activeName}
+                        className="lg:self-start"
+                    />
                 </div>
             </main>
 

@@ -1,14 +1,16 @@
 "use client"
 
 import * as React from "react"
-import { useMemo, useState } from "react"
-import { addMinutes, format, setDay, startOfDay, startOfWeek } from "date-fns"
+import { useEffect, useState } from "react"
+import { format } from "date-fns"
 import {
   Bus,
   CalendarDays,
   Flag,
   List,
+  Pencil,
   PersonStanding,
+  Trash2,
   TriangleAlert,
 } from "lucide-react"
 import { cn } from "cn"
@@ -24,18 +26,32 @@ import {
   EventCalendarDatePicker,
   EventCalendarNavNext,
   EventCalendarNavPrev,
-  EventCalendarNavToday,
   EventCalendarTitle,
 } from "@/components/reui/event-calendar/event-calendar-nav"
 import type {
   CalendarEvent,
   EventCalendarOccurrence,
 } from "@/components/reui/event-calendar/event-calendar-types"
+import { deduplicateEvents, type IcsEvent, type Weekday } from "@/lib/ics/parseIcs"
+import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 
-type ClassData = { location: string; building: string }
+type ClassData = { eventId: string; location: string; building: string }
 type Mode = "list" | "calendar"
 
-const BYDAY = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"] as const
+const INITIAL_DATE = new Date("1970-01-01T12:00:00")
+
+const BYDAY: Record<Weekday, string> = {
+  Sunday: "SU",
+  Monday: "MO",
+  Tuesday: "TU",
+  Wednesday: "WE",
+  Thursday: "TH",
+  Friday: "FR",
+  Saturday: "SA",
+}
 
 const WALK_FROM_ILC: Record<string, number> = {
   ILC: 0,
@@ -45,54 +61,86 @@ const WALK_FROM_ILC: Record<string, number> = {
   Isenberg: 9,
 }
 
-// mock courses
-const COURSES: {
-  id: string
-  name: string
-  building: string
-  location: string
-  days: number[]
-  start: number
-  minutes: number
-  color: string
-}[] = [
-  { id: "econ", name: "Econ 101", building: "ILC", location: "Integrated Learning Center", days: [1, 4], start: 8 * 60 + 30, minutes: 75, color: "var(--color-violet-500)" },
-  { id: "math", name: "Math 132", building: "LGRT", location: "Lederle Graduate Research Tower", days: [2, 4], start: 10 * 60, minutes: 75, color: "var(--color-sky-500)" },
-  { id: "bus", name: "Business 101", building: "Isenberg", location: "Isenberg School of Management", days: [1, 5], start: 12 * 60 + 20, minutes: 75, color: "var(--color-amber-500)" },
-  { id: "phys", name: "Physics 131", building: "Morrill Science Center", location: "Morrill Science Center", days: [3, 5], start: 8 * 60 + 30, minutes: 75, color: "var(--color-rose-500)" },
-  { id: "cs", name: "Comp Sci 121", building: "ILC", location: "Integrated Learning Center", days: [3], start: 13 * 60, minutes: 75, color: "var(--color-emerald-500)" },
-  { id: "lunch", name: "Lunch", building: "Worcester Dining Commons", location: "Worcester Dining Commons", days: [1, 2, 3, 4, 5], start: 11 * 60 + 30, minutes: 45, color: "var(--color-slate-500)" },
+const EVENT_COLORS = [
+  "var(--color-violet-500)",
+  "var(--color-sky-500)",
+  "var(--color-amber-500)",
+  "var(--color-rose-500)",
+  "var(--color-emerald-500)",
 ]
 
-function buildEvents(anchor: Date): CalendarEvent<ClassData>[] {
-  const weekStart = startOfWeek(anchor, { weekStartsOn: 0 })
+function makeDate(date: string, time: string) {
+  const value = new Date(`${date}T${time}:00`)
+  return Number.isNaN(value.getTime()) ? null : value
+}
 
-  return COURSES.map((course) => {
-    const firstDay = startOfDay(setDay(weekStart, course.days[0]))
-    const start = addMinutes(firstDay, course.start)
-    return {
-      id: course.id,
-      title: course.name,
+function buildEvents(events: IcsEvent[]): CalendarEvent<ClassData>[] {
+  return deduplicateEvents(events).flatMap((event, index) => {
+    const start = makeDate(event.startDate, event.startTime)
+    if (!start) return []
+
+    const end = makeDate(event.startDate, event.endTime)
+    const safeEnd = end && end > start
+      ? end
+      : new Date(start.getTime() + Math.max(event.durationMinutes, 1) * 60_000)
+
+    const recurrence =
+      event.recurrence?.raw ||
+      (event.days.length > 0
+        ? `RRULE:FREQ=WEEKLY;BYDAY=${event.days.map((day) => BYDAY[day]).join(",")}`
+        : undefined)
+    const recurrenceRule =
+      recurrence && !/^RRULE:/i.test(recurrence)
+        ? `RRULE:${recurrence}`
+        : recurrence
+
+    return [{
+      id: event.id,
+      title: event.name,
       start,
-      end: addMinutes(start, course.minutes),
-      color: course.color,
+      end: safeEnd,
+      color: EVENT_COLORS[index % EVENT_COLORS.length],
       readOnly: true,
-      recurrence: `RRULE:FREQ=WEEKLY;BYDAY=${course.days.map((d) => BYDAY[d]).join(",")}`,
-      data: { location: course.location, building: course.building },
-    }
+      recurrence: recurrenceRule,
+      data: {
+        eventId: event.id,
+        location: event.location,
+        building: event.location,
+      },
+    }]
   })
 }
 
+type EventForm = {
+  name: string
+  location: string
+  startDate: string
+  startTime: string
+  endTime: string
+}
+
+function localDate(date: Date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-")
+}
+
+function localTime(date: Date) {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+}
+
 function renderChip({ occurrence, segment }: EventCalendarRenderEventProps<ClassData>) {
-  const building = occurrence.event.data?.building
+  const location = occurrence.event.data?.location
   const minutes = (segment.endMin ?? 0) - (segment.startMin ?? 0)
 
   return (
     <span className="flex h-full min-w-0 flex-col gap-0.5">
       <span className="truncate font-semibold">{occurrence.event.title}</span>
-      {building && minutes >= 45 && (
+      {location && minutes >= 45 && (
         <span className="truncate text-[11px] font-medium text-(--ec-event-color)">
-          {building}
+          {location}
         </span>
       )}
     </span>
@@ -125,12 +173,23 @@ function legTo(
   return { kind: "walk", label: `${walk} min walk` }
 }
 
-function DayList() {
+function DayList({
+  onEdit,
+}: {
+  onEdit: (occurrence: EventCalendarOccurrence<ClassData>) => void
+}) {
   const { date } = useEventCalendarNavigation()
   const { segments } = useEventCalendarDay<ClassData>(date)
-  const stops = [...segments.timed]
-    .map((segment) => segment.occurrence)
-    .sort((a, b) => a.start.getTime() - b.start.getTime())
+  const stopsByKey = new Map<string, EventCalendarOccurrence<ClassData>>()
+  for (const segment of segments.timed) {
+    const stop = segment.occurrence
+    if (!stopsByKey.has(stop.key)) {
+      stopsByKey.set(stop.key, stop)
+    }
+  }
+  const stops = [...stopsByKey.values()].sort(
+    (a, b) => a.start.getTime() - b.start.getTime(),
+  )
 
   if (stops.length === 0) {
     return (
@@ -163,10 +222,10 @@ function DayList() {
                   style={{ backgroundColor: stop.event.color }}
                   aria-hidden
                 />
-                <span className="truncate">{stop.event.data?.building}</span>
+                <span className="truncate">{stop.event.title}</span>
               </p>
               <p className="truncate text-sm text-muted-foreground">
-                {stop.event.title} &middot; {stop.event.data?.location}
+                {stop.event.data?.location || "Location not set"}
               </p>
             </div>
 
@@ -176,6 +235,15 @@ function DayList() {
               </span>
               <span className={cn("text-xs font-medium", meta)}>{leg.label}</span>
             </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Edit ${stop.event.title}`}
+              onClick={() => onEdit(stop)}
+            >
+              <Pencil className="size-4" />
+            </Button>
           </li>
         )
       })}
@@ -186,12 +254,22 @@ function DayList() {
 function StopCount() {
   const { date } = useEventCalendarNavigation()
   const { segments } = useEventCalendarDay(date)
-  const count = segments.timed.length
+  const count = new Set(segments.timed.map((segment) => segment.occurrence.key)).size
   return (
     <span className="text-xs font-medium text-muted-foreground">
       {count} {count === 1 ? "stop" : "stops"}
     </span>
   )
+}
+
+function InitializeToday() {
+  const { goTo } = useEventCalendarNavigation()
+
+  useEffect(() => {
+    goTo(new Date())
+  }, [goTo])
+
+  return null
 }
 
 const MODES: { value: Mode; label: string; icon: React.ElementType }[] = [
@@ -200,14 +278,120 @@ const MODES: { value: Mode; label: string; icon: React.ElementType }[] = [
 ]
 
 export function DayCalendar({
+  scheduleId,
   calendarName,
   className,
 }: {
+  scheduleId?: string
   calendarName: string
   className?: string
 }) {
-  const events = useMemo(() => buildEvents(new Date()), [])
+  const [events, setEvents] = useState<CalendarEvent<ClassData>[]>([])
   const [mode, setMode] = useState<Mode>("list")
+  const [editing, setEditing] = useState<EventCalendarOccurrence<ClassData> | null>(null)
+  const [form, setForm] = useState<EventForm | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const loadEvents = async () => {
+    if (!scheduleId) return
+    const response = await fetch(`/api/schedules/${encodeURIComponent(scheduleId)}/events`)
+    const result = await response.json()
+    if (!response.ok) throw new Error(result.error || "Failed to load schedule.")
+    setEvents(buildEvents(result.events ?? []))
+  }
+
+  useEffect(() => {
+    if (!scheduleId) {
+      return
+    }
+
+    const controller = new AbortController()
+    void fetch(`/api/schedules/${encodeURIComponent(scheduleId)}/events`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const result = await response.json()
+        if (!response.ok) throw new Error(result.error || "Failed to load schedule.")
+        setEvents(buildEvents(result.events ?? []))
+      })
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return
+        setEvents([])
+      })
+
+    return () => controller.abort()
+  }, [scheduleId])
+
+  const openEditor = (occurrence: EventCalendarOccurrence<ClassData>) => {
+    setEditing(occurrence)
+    setForm({
+      name: occurrence.event.title,
+      location: occurrence.event.data?.location ?? "",
+      startDate: localDate(occurrence.start),
+      startTime: localTime(occurrence.start),
+      endTime: localTime(occurrence.end),
+    })
+    setError(null)
+  }
+
+  const saveEvent = async () => {
+    if (!scheduleId || !editing || !form) return
+    const eventId = editing.event.data?.eventId
+    if (!eventId) return
+
+    setSaving(true)
+    setError(null)
+    try {
+      const response = await fetch(
+        `/api/schedules/${encodeURIComponent(scheduleId)}/events/${encodeURIComponent(eventId)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: form.name,
+            location: form.location.trim() ? form.location.trim() : null,
+            startDate: form.startDate,
+            startTime: form.startTime,
+            endTime: form.endTime,
+          }),
+        },
+      )
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || "Failed to save event.")
+      await loadEvents()
+      setEditing(null)
+      setForm(null)
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Failed to save event.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const deleteEvent = async () => {
+    if (!scheduleId || !editing) return
+    const eventId = editing.event.data?.eventId
+    if (!eventId) return
+
+    setSaving(true)
+    setError(null)
+    try {
+      const response = await fetch(
+        `/api/schedules/${encodeURIComponent(scheduleId)}/events/${encodeURIComponent(eventId)}`,
+        { method: "DELETE" },
+      )
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error || "Failed to delete event.")
+      await loadEvents()
+      setEditing(null)
+      setForm(null)
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Failed to delete event.")
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <section
@@ -217,7 +401,8 @@ export function DayCalendar({
       )}
     >
       <EventCalendar
-        defaultEvents={events}
+        events={events}
+        defaultDate={INITIAL_DATE}
         defaultView="day"
         views={["day"]}
         dayStartHour={8}
@@ -226,6 +411,7 @@ export function DayCalendar({
         renderEvent={renderChip}
         className={cn("w-full", mode === "calendar" && "h-[32rem]")}
       >
+        <InitializeToday />
         <header className="flex items-center justify-between gap-2 px-4 pt-3">
           <div className="flex min-w-0 items-baseline gap-2">
             <h2 className="truncate text-lg font-bold tracking-tight">{calendarName}</h2>
@@ -259,7 +445,6 @@ export function DayCalendar({
         </header>
 
         <div className="flex flex-wrap items-center gap-1 px-2 py-2">
-          <EventCalendarNavToday />
           <div className="flex items-center">
             <EventCalendarNavPrev />
             <EventCalendarNavNext />
@@ -269,8 +454,95 @@ export function DayCalendar({
           <EventCalendarDatePicker />
         </div>
 
-        {mode === "calendar" ? <EventCalendarContent /> : <DayList />}
+        {mode === "calendar" ? <EventCalendarContent /> : <DayList onEdit={openEditor} />}
       </EventCalendar>
+
+      <Dialog
+        open={editing !== null}
+        onOpenChange={(open) => {
+          if (!open && !saving) {
+            setEditing(null)
+            setForm(null)
+            setError(null)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit event</DialogTitle>
+          </DialogHeader>
+          {form && (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="edit-event-name">Name</Label>
+                <Input
+                  id="edit-event-name"
+                  value={form.name}
+                  onChange={(event) => setForm({ ...form, name: event.target.value })}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="edit-event-location">Location</Label>
+                <Input
+                  id="edit-event-location"
+                  value={form.location}
+                  onChange={(event) => setForm({ ...form, location: event.target.value })}
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="edit-event-date">Date</Label>
+                <Input
+                  id="edit-event-date"
+                  type="date"
+                  value={form.startDate}
+                  onChange={(event) => setForm({ ...form, startDate: event.target.value })}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="edit-event-start">Starts</Label>
+                  <Input
+                    id="edit-event-start"
+                    type="time"
+                    value={form.startTime}
+                    onChange={(event) => setForm({ ...form, startTime: event.target.value })}
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="edit-event-end">Ends</Label>
+                  <Input
+                    id="edit-event-end"
+                    type="time"
+                    value={form.endTime}
+                    onChange={(event) => setForm({ ...form, endTime: event.target.value })}
+                  />
+                </div>
+              </div>
+              {error && <p className="text-sm text-destructive">{error}</p>}
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="gap-2"
+                  onClick={() => void deleteEvent()}
+                  disabled={saving}
+                >
+                  <Trash2 className="size-4" />
+                  Delete
+                </Button>
+                <Button
+                  type="button"
+                  className="flex-1"
+                  onClick={() => void saveEvent()}
+                  disabled={saving || !form.name.trim()}
+                >
+                  {saving ? "Saving..." : "Save changes"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </section>
   )
 }

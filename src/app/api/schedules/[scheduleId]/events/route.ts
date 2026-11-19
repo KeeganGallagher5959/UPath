@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { loadCalendar } from '@/lib/schedules/loadCalendar';
-import { parseIcs, searchEvents } from '@/lib/ics/parseIcs';
+import { deduplicateEvents, parseIcs, searchEvents } from '@/lib/ics/parseIcs';
 import { addEvent } from '@/lib/ics/editics';
 import { applyEdit } from '@/lib/schedules/applyEdit';
  
@@ -37,13 +37,13 @@ export async function GET(request: Request, { params }: Ctx) {
   const days = q.getAll('day');
   const date = q.get('date') ?? undefined;
  
-  const events = searchEvents(result.calendar.events, {
+  const events = deduplicateEvents(searchEvents(result.calendar.events, {
     query: q.get('q') ?? undefined,
     day: days.length > 0 ? days : undefined,
     onDate: date,
     startsAfter: q.get('after') ?? undefined,
     endsBefore: q.get('before') ?? undefined,
-  });
+  }));
  
   if (date) events.sort((a, b) => a.startTime.localeCompare(b.startTime));
  
