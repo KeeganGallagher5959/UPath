@@ -1,199 +1,140 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import ical, { type VEvent } from 'node-ical';
+import { parseIcs } from '@/lib/ics/parseIcs';
 
-const TIMEZONE = 'America/New_York';
-
-interface CleanEvent {
-  name: string;
-  location: string | null;
-  day_of_week: string;
-  start_time: string;
-  end_time: string | null;
-}
-
-const timeFormatter = new Intl.DateTimeFormat('en-US', {
-  timeZone: TIMEZONE,
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: true, 
-});
-
-const dayFormatter = new Intl.DateTimeFormat('en-US', {
-  timeZone: TIMEZONE,
-  weekday: 'long',
-});
-
-function clean(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  return value.replace(/\*/g, '').trim() || null;
-}
-
-function formatLocalTime(date: Date | string | number | undefined): string | null {
-  if (!date) return null;
-  const d = date instanceof Date ? date : new Date(date);
-  if (isNaN(d.getTime())) return null;
-  return timeFormatter.format(d);
-}
-
-function getLocalDay(date: Date | string | number | undefined): string | null {
-  if (!date) return null;
-  const d = date instanceof Date ? date : new Date(date);
-  if (isNaN(d.getTime())) return null;
-  return dayFormatter.format(d);
-}
-
-function isEvent(item: unknown): item is VEvent {
-  return (
-    typeof item === 'object' &&
-    item !== null &&
-    'type' in item &&
-    (item as { type: unknown }).type === 'VEVENT'
-  );
-}
-
-const RRULE_DAY_MAP: Record<string, string> = {
-  MO: 'Monday',
-  TU: 'Tuesday',
-  WE: 'Wednesday',
-  TH: 'Thursday',
-  FR: 'Friday',
-  SA: 'Saturday',
-  SU: 'Sunday',
-};
+const MAX_FILE_SIZE = 1_000_000;
 
 export async function POST(request: Request) {
+  let client;
+
   try {
-    const form = await request.formData();
-    const file = form.get('file');
-
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: 'No file provided' }, { status: 400 });
-    }
-
-    const scheduleName = form.get('name');
-    const text = await file.text();
-    const parsed = await ical.async.parseICS(text);
-    const client = await createClient(); // Initialize DB client
-    const {
-      data: { user },
-    } = await client.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'You must be signed in to import a calendar.' }, { status: 401 });
-    }
-
-    // 1. Create the Schedule in DB
-    const { data: schedule, error: scheduleError } = await client
-      .from('schedules')
-      .insert({
-        uid: user.id,
-        name:
-          typeof scheduleName === 'string' && scheduleName.trim()
-            ? scheduleName.trim()
-            : file.name.replace(/\.ics$/i, ''),
-      })
-      .select()
-      .single();
-
-    if (scheduleError) {
-      return NextResponse.json({ error: scheduleError.message }, { status: 400 });
-    }
-
-    // 2. Parse and Deduplicate Events (from local version)
-    const seen = new Set<string>();
-    const cleanEvents: CleanEvent[] = [];
-
-    for (const item of Object.values(parsed)) {
-      if (!isEvent(item) || !item.start) continue;
-
-      const name = clean(item.summary);
-      const startTime = formatLocalTime(item.start);
-      if (!name || !startTime) continue;
-
-      const location = clean(item.location);
-      const endTime = formatLocalTime(item.end);
-      const days = new Set<string>();
-
-      if (item.rrule && typeof item.rrule === 'object' && 'options' in item.rrule) {
-        const byweekday = (item.rrule.options as { byweekday?: Array<{ code?: string } | string> }).byweekday;
-        if (Array.isArray(byweekday)) {
-          for (const ruleDay of byweekday) {
-            const code = typeof ruleDay === 'string' ? ruleDay : ruleDay?.code;
-            if (code && RRULE_DAY_MAP[code]) {
-              days.add(RRULE_DAY_MAP[code]);
-            }
-          }
-        }
-      }
-
-      if (days.size === 0) {
-        const initialDay = getLocalDay(item.start);
-        if (initialDay) days.add(initialDay);
-      }
-
-      for (const day of days) {
-        const key = `${name}|${day}|${startTime}|${location ?? ''}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-
-        cleanEvents.push({
-          name,
-          location,
-          day_of_week: day,
-          start_time: startTime,
-          end_time: endTime,
-        });
-      }
-    }
-
-    // 3. Process Locations (with caching to avoid redundant DB inserts)
-    const locationIds = new Map<string, string>(); // Cache: locationName -> location_id
-
-    for (const ce of cleanEvents) {
-      if (ce.location && !locationIds.has(ce.location)) {
-        // You might want to use a unique constraint and an upsert (.upsert()) here in production,
-        // but this follows your original logic
-        const { data: loc, error: locError } = await client
-          .from('locations')
-          .insert({ uid: user.id, name: ce.location, lat: 0, long: 0 })
-          .select('id')
-          .single();
-
-        if (!locError && loc) {
-          locationIds.set(ce.location, loc.id);
-        }
-      }
-    }
-
-    // 4. Map to DB Events array
-    // Note: Ensure your 'events' table has the `day_of_week` column added to support this!
-    const eventsToInsert = cleanEvents.map((ce) => ({
-      schedule_id: schedule.id,
-      location_id: ce.location ? locationIds.get(ce.location) || null : null,
-      name: ce.name,
-      day_of_week: ce.day_of_week, 
-      start_time: ce.start_time,
-      end_time: ce.end_time,
-    }));
-
-    // 5. Bulk insert events
-    if (eventsToInsert.length > 0) {
-      const { data, error } = await client.from('events').insert(eventsToInsert).select();
-      
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 400 });
-      }
-      
-      return NextResponse.json({ schedule, events: data });
-    }
-
-    return NextResponse.json({ schedule, events: [] });
-
+    client = await createClient();
   } catch (error) {
+    return NextResponse.json({
+      error: 'Failed to process ICS file',
+      details: error instanceof Error ? error.message : String(error),
+    }, { status: 500 });
+  }
+
+  const {
+    data: { user },
+  } = await client.auth.getUser();
+
+  if (!user) {
     return NextResponse.json(
-      { error: 'Failed to process ICS file', details: error instanceof Error ? error.message : String(error) },
-      { status: 500 }
+      { error: 'You must be signed in to import a calendar.' },
+      { status: 401 },
     );
   }
+
+  const form = await request.formData();
+  const file = form.get('file');
+  const nameValue = form.get('name');
+
+  if (!(file instanceof File)) {
+    return NextResponse.json({ error: 'No file provided' }, { status: 400 });
+  }
+
+  if (file.size > MAX_FILE_SIZE) {
+    return NextResponse.json({ error: 'File is too large' }, { status: 413 });
+  }
+
+  if (!file.name.toLowerCase().endsWith('.ics') && file.type !== 'text/calendar') {
+    return NextResponse.json({ error: 'Not a valid .ics file' }, { status: 400 });
+  }
+
+  let text: string;
+  try {
+    text = await file.text();
+  } catch (error) {
+    return NextResponse.json({
+      error: 'Failed to process ICS file',
+      details: error instanceof Error ? error.message : String(error),
+    }, { status: 500 });
+  }
+
+  if (!/^BEGIN:VCALENDAR\b/m.test(text)) {
+    return NextResponse.json({ error: 'Not a valid .ics file' }, { status: 400 });
+  }
+
+  let calendar;
+  try {
+    calendar = parseIcs(text);
+  } catch (error) {
+    return NextResponse.json({
+      error: 'Failed to process ICS file',
+      details: error instanceof Error ? error.message : String(error),
+    }, { status: 500 });
+  }
+
+  if (calendar.events.length === 0) {
+    return NextResponse.json(
+      { error: 'No events found in this file' },
+      { status: 422 },
+    );
+  }
+
+  calendar.events = calendar.events.map((event) => ({
+    ...event,
+    id: /^[^|]+\|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(event.id)
+      ? `${event.id}@upath`
+      : event.id,
+  }));
+
+  const name = typeof nameValue === 'string' && nameValue.trim()
+    ? nameValue.trim()
+    : file.name.replace(/\.ics$/i, '') || 'My Calendar';
+  let insertedSchedule: { id?: string; name: string } = { name };
+
+  if ('from' in client) {
+    const replaceId = form.get('replaceId');
+    const { data: existingSchedules } = await client
+      .from('schedules')
+      .select('id, name');
+
+    const occupiedNames = new Set(
+      (existingSchedules ?? [])
+        .filter((schedule) => schedule.id !== replaceId)
+        .map((schedule) => schedule.name.trim().toLowerCase()),
+    );
+
+    const baseName = name;
+    let uniqueName = baseName;
+    let suffix = 2;
+    while (occupiedNames.has(uniqueName.trim().toLowerCase())) {
+      uniqueName = `${baseName} (${suffix})`;
+      suffix += 1;
+    }
+
+    calendar.name = uniqueName;
+
+    const insertResult = await client
+      .from('schedules')
+      .insert({ uid: user.id, name: uniqueName, ics: text })
+      .select('id, name, ics')
+      .single();
+
+    if (insertResult.error?.code === 'PGRST204' || insertResult.error?.code === '42703') {
+      const fallbackInsert = await client
+        .from('schedules')
+        .insert({ uid: user.id, name: uniqueName })
+        .select('id, name')
+        .single();
+      if (fallbackInsert.error) {
+        return NextResponse.json({ error: fallbackInsert.error.message }, { status: 400 });
+      }
+      insertedSchedule = fallbackInsert.data ?? { name: uniqueName };
+    } else if (insertResult.error) {
+      return NextResponse.json({ error: insertResult.error.message }, { status: 400 });
+    } else {
+      insertedSchedule = insertResult.data ?? { name: uniqueName };
+    }
+  } else {
+    calendar.name = name;
+  }
+
+  return NextResponse.json({
+    schedule: insertedSchedule,
+    calendar,
+  }, { status: 200 });
 }
