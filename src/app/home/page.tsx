@@ -1,26 +1,105 @@
 "use client"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { CloudUpload, LogOut, Settings } from "lucide-react"
 
 import { BrandLockup } from "@/components/brand"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { CalendarTabs, RouteMap, ScheduleList } from "./components"
 
+type Schedule = { id: string; name: string }
+
 export default function Home() {
-    const [calendars, setCalendars] = useState(["Fall 2026", "Calendar 2"]);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const uploadInFlightRef = useRef(false);
+    const [calendars, setCalendars] = useState<Schedule[]>([]);
     const [active, setActive] = useState(0);
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const [name, setName] = useState("My Calendar");
+    const [uploadOpen, setUploadOpen] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-    const addCalendar = () =>
-        setCalendars((prev) => [...prev, `Calendar ${prev.length + 1}`]);
+    useEffect(() => {
+        const loadSchedules = async () => {
+            const response = await fetch("/api/schedules");
+            if (!response.ok) return;
+            const result = await response.json();
+            setCalendars(result.schedules ?? []);
+        };
+        void loadSchedules();
+    }, []);
 
-    const deleteCalendar = () =>
+    const addCalendar = () => {
+        setError(null);
+        fileInputRef.current?.click();
+    };
+
+    const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+        if (!file.name.toLowerCase().endsWith(".ics")) {
+            setError("Please choose an .ics calendar file.");
+            return;
+        }
+        setSelectedFile(file);
+        setName(file.name.replace(/\.ics$/i, "") || "My Calendar");
+        setUploadOpen(true);
+    };
+
+    const uploadCalendar = async () => {
+        if (!selectedFile || uploadInFlightRef.current) return;
+        uploadInFlightRef.current = true;
+        setIsUploading(true);
+        setError(null);
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 30_000);
+        try {
+            const form = new FormData();
+            form.append("file", selectedFile);
+            form.append("name", name.trim() || "My Calendar");
+            const response = await fetch("/api/schedules/upload", { method: "POST", body: form, signal: controller.signal });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || "Failed to upload calendar.");
+            setCalendars((prev) => {
+                const next = [...prev, result.schedule];
+                setActive(next.length - 1);
+                return next;
+            });
+            setUploadOpen(false);
+            setSelectedFile(null);
+        } catch (uploadError) {
+            setError(
+                uploadError instanceof DOMException && uploadError.name === "AbortError"
+                    ? "Upload timed out. Please try again."
+                    : uploadError instanceof Error
+                        ? uploadError.message
+                        : "Failed to upload calendar.",
+            );
+        } finally {
+            window.clearTimeout(timeout);
+            uploadInFlightRef.current = false;
+            setIsUploading(false);
+        }
+    };
+
+    const deleteCalendar = async () => {
+        const schedule = calendars[active];
+        if (!schedule) return;
+        const response = await fetch(`/api/schedules/${schedule.id}`, { method: "DELETE" });
+        if (!response.ok) return;
         setCalendars((prev) => {
-            if (prev.length <= 1) return prev;
             const next = prev.filter((_, i) => i !== active);
             setActive((current) => Math.min(current, next.length - 1));
             return next;
         });
+    };
+
+    const calendarNames = calendars.map((calendar) => calendar.name);
+    const activeName = calendarNames[active] ?? "Calendar";
 
     return (
         <div className='flex min-h-svh flex-col bg-background'>
@@ -35,11 +114,12 @@ export default function Home() {
                         <span className='hidden sm:inline'>Upload calendar</span>
                         <span className='sr-only sm:hidden'>Upload calendar</span>
                 </Button>
+                <input ref={fileInputRef} type="file" accept=".ics,text/calendar" onChange={handleFileChange} className="hidden" aria-label="Choose an ICS calendar file" />
             </header>
 
             <main className='mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-5 pb-4 sm:px-8'>
                 <CalendarTabs
-                    calendars={calendars}
+                    calendars={calendarNames}
                     active={active}
                     onChange={setActive}
                     onAdd={addCalendar}
@@ -48,9 +128,24 @@ export default function Home() {
 
                 <div className='grid flex-1 gap-4 lg:grid-cols-2'>
                     <RouteMap className='aspect-[4/3] w-full lg:aspect-auto lg:h-full lg:min-h-[32rem]' />
-                    <ScheduleList calendarName={calendars[active]} className='lg:self-start' />
+                    <ScheduleList
+                        scheduleId={calendars[active]?.id}
+                        calendarName={activeName}
+                        className='lg:self-start'
+                    />
                 </div>
             </main>
+
+            <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
+                <DialogContent className="gap-5">
+                    <DialogHeader><DialogTitle className="text-xl font-bold">Name Your Calendar</DialogTitle></DialogHeader>
+                    <Input autoFocus value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void uploadCalendar(); }} aria-label="Calendar name" className="h-12 rounded-xl text-base" />
+                    {error && <p className="text-sm text-destructive">{error}</p>}
+                    <Button type="button" onClick={() => void uploadCalendar()} disabled={isUploading || !selectedFile} className="h-12 w-full rounded-xl">
+                        {isUploading ? "Uploading..." : "Upload Calendar"}
+                    </Button>
+                </DialogContent>
+            </Dialog>
 
             <footer className='mt-auto flex items-center justify-between border-t border-border px-5 py-3 sm:px-8'>
                 <Button

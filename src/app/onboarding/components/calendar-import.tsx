@@ -19,6 +19,7 @@ import { WeekGrid } from "./week-grid"
  */
 export function CalendarImport({ onSubmit }: { onSubmit: (name: string) => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const inFlightRef = useRef(false)
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("Fall 2026")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -46,14 +47,19 @@ export function CalendarImport({ onSubmit }: { onSubmit: (name: string) => void 
   }
 
   const commit = async () => {
+    if (inFlightRef.current) return
     const trimmed = name.trim() || "My Calendar"
     if (!selectedFile) {
       setError("Choose an .ics file before submitting.")
       return
     }
 
+    inFlightRef.current = true
     setIsUploading(true)
     setError(null)
+
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 30_000)
 
     try {
       const form = new FormData()
@@ -63,6 +69,7 @@ export function CalendarImport({ onSubmit }: { onSubmit: (name: string) => void 
       const response = await fetch("/api/schedules/upload", {
         method: "POST",
         body: form,
+        signal: controller.signal,
       })
       const result = await response.json()
 
@@ -75,8 +82,16 @@ export function CalendarImport({ onSubmit }: { onSubmit: (name: string) => void 
       setOpen(false)
       onSubmit(result.schedule?.name || trimmed)
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Failed to upload calendar.")
+      setError(
+        uploadError instanceof DOMException && uploadError.name === "AbortError"
+          ? "Upload timed out. Please try again."
+          : uploadError instanceof Error
+            ? uploadError.message
+            : "Failed to upload calendar.",
+      )
     } finally {
+      window.clearTimeout(timeout)
+      inFlightRef.current = false
       setIsUploading(false)
     }
   }

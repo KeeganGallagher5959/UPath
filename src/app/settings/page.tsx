@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
+import { Input } from "@/components/ui/input"
 import { TRANSPORT, type TransportMode } from "@/lib"
 
 const THEME_OPTIONS = [
@@ -69,6 +70,15 @@ function Skeleton({ className }: { className?: string }) {
 export default function Settings() {
     const router = useRouter();
     const { theme, setTheme } = useTheme();
+    const calendarInputRef = React.useRef<HTMLInputElement>(null);
+    const calendarUploadInFlightRef = React.useRef(false);
+    const [calendars, setCalendars] = React.useState<Array<{ id: string; name: string }>>([]);
+    const [calendarFile, setCalendarFile] = React.useState<File | null>(null);
+    const [calendarName, setCalendarName] = React.useState("My Calendar");
+    const [calendarOpen, setCalendarOpen] = React.useState(false);
+    const [replaceId, setReplaceId] = React.useState<string | null>(null);
+    const [calendarBusy, setCalendarBusy] = React.useState(false);
+    const [calendarError, setCalendarError] = React.useState<string | null>(null);
     const [username, setUsername] = React.useState("");
     const [email, setEmail] = React.useState("");
     const [accountStatus, setAccountStatus] = React.useState<"idle" | "signingOut" | "deleting" | "error">("idle");
@@ -104,6 +114,12 @@ export default function Settings() {
             setNotifications(profile.push_notifications);
             setAlerts(profile.class_alerts);
             setStatus("idle");
+
+            const schedulesResponse = await fetch('/api/schedules');
+            if (schedulesResponse.ok) {
+                const schedulesResult = await schedulesResponse.json();
+                setCalendars(schedulesResult.schedules ?? []);
+            }
         };
 
         loadSettings();
@@ -128,6 +144,68 @@ export default function Settings() {
         });
         setStatus(response.ok ? "saved" : "error");
     }
+
+    const chooseCalendar = (scheduleId: string | null = null) => {
+        setReplaceId(scheduleId);
+        setCalendarError(null);
+        calendarInputRef.current?.click();
+    };
+
+    const handleCalendarFile = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+        if (!file.name.toLowerCase().endsWith(".ics")) {
+            setCalendarError("Please choose an .ics calendar file.");
+            return;
+        }
+        setCalendarFile(file);
+        setCalendarName(file.name.replace(/\.ics$/i, "") || "My Calendar");
+        setCalendarOpen(true);
+    };
+
+    const uploadCalendar = async () => {
+        if (!calendarFile || calendarUploadInFlightRef.current) return;
+        calendarUploadInFlightRef.current = true;
+        setCalendarBusy(true);
+        setCalendarError(null);
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 30_000);
+        try {
+            const form = new FormData();
+            form.append("file", calendarFile);
+            form.append("name", calendarName.trim() || "My Calendar");
+            if (replaceId) form.append("replaceId", replaceId);
+            const response = await fetch("/api/schedules/upload", { method: "POST", body: form, signal: controller.signal });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || "Failed to upload calendar.");
+
+            if (replaceId) {
+                await fetch(`/api/schedules/${replaceId}`, { method: "DELETE" });
+                setCalendars((prev) => prev.map((calendar) =>
+                    calendar.id === replaceId ? result.schedule : calendar
+                ));
+            } else {
+                setCalendars((prev) => [...prev, result.schedule]);
+            }
+
+            setCalendarOpen(false);
+            setCalendarFile(null);
+            setReplaceId(null);
+        } catch (uploadError) {
+            setCalendarError(
+                uploadError instanceof DOMException && uploadError.name === "AbortError"
+                    ? "Upload timed out. Please try again."
+                    : uploadError instanceof Error
+                        ? uploadError.message
+                        : "Failed to upload calendar.",
+            );
+        } finally {
+            window.clearTimeout(timeout);
+            calendarUploadInFlightRef.current = false;
+            setCalendarBusy(false);
+        }
+    };
 
     const onSignOut = async () => {
         setAccountStatus("signingOut");
@@ -332,26 +410,45 @@ export default function Settings() {
             <section className='flex flex-col gap-2'>
                 <h2 className='px-1 text-sm font-semibold text-muted-foreground'>Calendars</h2>
                 <Card className='p-0'>
-                    <SettingRow
-                        icon={CalendarArrowUp}
-                        title='Fall 2026'
-                        description='Imported from an .ics file.'
-                        control={
-                            <Button variant='outline' size='sm' className='rounded-lg'>
-                                Replace
-                            </Button>
-                        }
-                    />
-                    <Separator />
+                    {calendars.map((calendar, index) => (
+                        <React.Fragment key={calendar.id}>
+                            {index > 0 && <Separator />}
+                            <SettingRow
+                                icon={CalendarArrowUp}
+                                title={calendar.name}
+                                description='Imported from an .ics file.'
+                                control={
+                                    <Button
+                                        variant='outline'
+                                        size='sm'
+                                        className='rounded-lg'
+                                        onClick={() => chooseCalendar(calendar.id)}>
+                                        Replace
+                                    </Button>
+                                }
+                            />
+                        </React.Fragment>
+                    ))}
+                    {calendars.length > 0 && <Separator />}
                     <div className='px-4 py-4 sm:px-5'>
                         <Button
                             variant='outline'
+                            onClick={() => chooseCalendar()}
                             className='h-11 w-full gap-2 rounded-xl border-border text-base font-semibold text-primary'>
                             <CalendarArrowUp className='size-5' />
                             Import .ics
                         </Button>
                     </div>
                 </Card>
+                <input
+                    ref={calendarInputRef}
+                    type='file'
+                    accept='.ics,text/calendar'
+                    onChange={handleCalendarFile}
+                    className='hidden'
+                    aria-label='Choose an ICS calendar file'
+                />
+                {calendarError && <p className='text-center text-sm text-destructive'>{calendarError}</p>}
             </section>
 
             {/* Account */}
@@ -411,6 +508,32 @@ export default function Settings() {
                     </DialogContent>
                 </Dialog>
             </section>
+
+            <Dialog open={calendarOpen} onOpenChange={setCalendarOpen}>
+                <DialogContent className='gap-5'>
+                    <DialogHeader>
+                        <DialogTitle className='text-xl font-bold'>
+                            {replaceId ? "Replace Calendar" : "Name Your Calendar"}
+                        </DialogTitle>
+                    </DialogHeader>
+                    <Input
+                        autoFocus
+                        value={calendarName}
+                        onChange={(event) => setCalendarName(event.target.value)}
+                        onKeyDown={(event) => { if (event.key === "Enter") void uploadCalendar(); }}
+                        aria-label='Calendar name'
+                        className='h-12 rounded-xl text-base'
+                    />
+                    {calendarError && <p className='text-sm text-destructive'>{calendarError}</p>}
+                    <Button
+                        type='button'
+                        onClick={() => void uploadCalendar()}
+                        disabled={calendarBusy || !calendarFile}
+                        className='h-12 w-full rounded-xl'>
+                        {calendarBusy ? "Uploading..." : replaceId ? "Replace Calendar" : "Upload Calendar"}
+                    </Button>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
