@@ -15,15 +15,16 @@ export async function DELETE(
     return NextResponse.json({ error: "You must be signed in." }, { status: 401 });
   }
 
-  const { error } = await client
+  const { data, error } = await client
     .from("schedules")
     .delete()
     .eq("id", scheduleId)
-    .eq("uid", user.id);
+    .eq("uid", user.id)
+    .select("id");
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
-
+  if (!data?.length) return NextResponse.json({ error: 'schedule not found.' }, { status: 404 });
   return NextResponse.json({ success: true });
 }
