@@ -104,8 +104,7 @@ export default function Home() {
         });
     };
 
-    const calendarNames = calendars.map((calendar) => calendar.name);
-    const activeName = calendarNames[active] ?? "Calendar";
+    const activeName = calendars[active]?.name ?? "Calendar";
 
     return (
         <div className='flex min-h-svh flex-col bg-background'>
@@ -125,7 +124,7 @@ export default function Home() {
 
             <main className='mx-auto flex w-full max-w-5xl flex-1 flex-col gap-4 px-5 pb-4 sm:px-8'>
                 <CalendarTabs
-                    calendars={calendarNames}
+                    calendars={calendars}
                     active={active}
                     onChange={setActive}
                     onAdd={addCalendar}

@@ -82,6 +82,12 @@ export function RouteMap({ className }: { className?: string }) {
       return
     }
 
+    map.on("styleimagemissing", ({ id }) => {
+      if (!map.hasImage(id)) {
+        map.addImage(id, { width: 1, height: 1, data: new Uint8Array(4) })
+      }
+    })
+
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right")
 
     const resize = new ResizeObserver(() => map.resize())
