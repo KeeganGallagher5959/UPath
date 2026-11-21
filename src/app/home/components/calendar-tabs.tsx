@@ -20,7 +20,7 @@ export function CalendarTabs({
   onDelete,
   className,
 }: {
-  calendars: string[]
+  calendars: { id: string; name: string }[]
   active: number
   onChange: (index: number) => void
   onAdd: () => void
@@ -30,9 +30,9 @@ export function CalendarTabs({
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <div className="-mb-1 flex flex-1 items-center gap-2 overflow-x-auto pb-1">
-        {calendars.map((name, i) => (
+        {calendars.map(({ id, name }, i) => (
           <button
-            key={name}
+            key={id}
             type="button"
             onClick={() => onChange(i)}
             aria-pressed={i === active}

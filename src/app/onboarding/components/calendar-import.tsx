@@ -1,6 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
+import dynamic from "next/dynamic"
 import { CalendarArrowUp } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -11,12 +12,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { WeekGrid } from "./week-grid"
 
-/**
- * Step 1 of onboarding — import a `.ics` calendar, preview the generated week,
- * then name and submit it.
- */
+const DayCalendar = dynamic(
+  () => import("@/app/home/components/day-calendar").then((module) => module.DayCalendar),
+  { ssr: false },
+)
+
+type Schedule = { id: string; name: string }
+
 export function CalendarImport({ onSubmit }: { onSubmit: (name: string) => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const inFlightRef = useRef(false)
@@ -25,6 +28,7 @@ export function CalendarImport({ onSubmit }: { onSubmit: (name: string) => void 
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [schedule, setSchedule] = useState<Schedule | null>(null)
 
   const selectFile = () => {
     setError(null)
@@ -77,10 +81,19 @@ export function CalendarImport({ onSubmit }: { onSubmit: (name: string) => void 
         throw new Error(result.error || "Failed to upload calendar.")
       }
 
+      const uploaded: Schedule = {
+        id: result.schedule?.id,
+        name: result.schedule?.name || trimmed,
+      }
+
+      if (schedule && schedule.id !== uploaded.id) {
+        void fetch(`/api/schedules/${encodeURIComponent(schedule.id)}`, { method: "DELETE" })
+      }
+
       setName(trimmed)
       setSelectedFile(null)
       setOpen(false)
-      onSubmit(result.schedule?.name || trimmed)
+      setSchedule(uploaded)
     } catch (uploadError) {
       setError(
         uploadError instanceof DOMException && uploadError.name === "AbortError"
@@ -110,7 +123,7 @@ export function CalendarImport({ onSubmit }: { onSubmit: (name: string) => void 
         className="mx-auto h-12 w-full max-w-[16rem] gap-2 rounded-xl border-border text-base font-semibold text-primary"
       >
         <CalendarArrowUp className="size-5" />
-        {isUploading ? "Uploading..." : "Import .ics"}
+        {isUploading ? "Uploading..." : schedule ? "Replace .ics" : "Import .ics"}
       </Button>
       <input
         ref={fileInputRef}
@@ -123,15 +136,17 @@ export function CalendarImport({ onSubmit }: { onSubmit: (name: string) => void 
 
       {error && <p className="text-center text-sm text-destructive">{error}</p>}
 
-      <WeekGrid />
+      <DayCalendar scheduleId={schedule?.id} calendarName={schedule?.name ?? "Calendar"} />
 
       <Button
         type="button"
-        onClick={() => (selectedFile ? setOpen(true) : selectFile())}
+        onClick={() =>
+          schedule ? onSubmit(schedule.name) : selectedFile ? setOpen(true) : selectFile()
+        }
         disabled={isUploading}
         className="h-12 w-full rounded-xl bg-primary text-lg font-semibold text-primary-foreground hover:bg-primary/90"
       >
-        Submit
+        {schedule ? "Continue" : "Submit"}
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
