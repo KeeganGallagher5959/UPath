@@ -22,6 +22,7 @@ export default function Home() {
     const uploadInFlightRef = useRef(false);
     const [calendars, setCalendars] = useState<Schedule[]>([]);
     const [active, setActive] = useState(0);
+    const restoredActiveRef = useRef(false);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [name, setName] = useState("My Calendar");
     const [uploadOpen, setUploadOpen] = useState(false);
@@ -33,10 +34,25 @@ export default function Home() {
             const response = await fetch("/api/schedules");
             if (!response.ok) return;
             const result = await response.json();
-            setCalendars(result.schedules ?? []);
+            const schedules: Schedule[] = result.schedules ?? [];
+            setCalendars(schedules);
+            let saved = 0;
+            try {
+                const parsed = Number(JSON.parse(localStorage.getItem('active') ?? '0'));
+                if (Number.isInteger(parsed)) saved = parsed;
+            } catch {}
+            setActive(Math.max(0, Math.min(saved, schedules.length - 1)));
+            restoredActiveRef.current = true;
         };
         void loadSchedules();
     }, []);
+
+    useEffect(() => {
+        if (!restoredActiveRef.current) return;
+        try {
+            localStorage.setItem('active', JSON.stringify(active));
+        } catch {}
+    }, [active])
 
     const addCalendar = () => {
         setError(null);
